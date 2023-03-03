@@ -58,7 +58,7 @@ impl<F: FieldExt, const RANGE: usize, const LOOKUP_RANGE: usize>
             Constraints::with_selector(q, [("range check", range_check(RANGE, value))])
         });
 
-        meta.lookup(|meta| {
+        meta.lookup("lookup",|meta| {
             let q_lookup = meta.query_selector(q_lookup);
             let value = meta.query_advice(value, Rotation::cur());
 
@@ -121,9 +121,9 @@ mod tests {
     use halo2_proofs::{
         circuit::floor_planner::V1,
         dev::{FailureLocation, MockProver, VerifyFailure},
-        pasta::Fp,
         plonk::{Any, Circuit},
     };
+    use halo2curves::pasta::Fp;
 
     use super::*;
 
@@ -200,15 +200,9 @@ mod tests {
                             region: (1, "Assign value for simple range check").into(),
                             offset: 0
                         },
-                        cell_values: vec![(((Any::Advice, 0).into(), 0).into(), "0x8".to_string())]
+                        cell_values: vec![(((Any::advice(), 0).into(), 0).into(), "0x8".to_string())]
                     },
-                    VerifyFailure::Lookup {
-                        lookup_index: 0,
-                        location: FailureLocation::InRegion {
-                            region: (2, "Assign value for lookup range check").into(),
-                            offset: 0
-                        }
-                    }
+                    VerifyFailure::Lookup {lookup_index:0,location:FailureLocation::InRegion{region:(2,"Assign value for lookup range check").into(),offset:0}, name: "lookup" }
                 ])
             );
         }

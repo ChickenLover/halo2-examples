@@ -51,7 +51,7 @@ impl<F: FieldExt, const NUM_BITS: usize, const RANGE: usize> RangeCheckConfig<F,
         let q_lookup = meta.complex_selector();
         let table = RangeTableConfig::configure(meta);
 
-        meta.lookup(|meta| {
+        meta.lookup("lookup",|meta| {
             let q_lookup = meta.query_selector(q_lookup);
             let num_bits = meta.query_advice(num_bits, Rotation::cur());
             let value = meta.query_advice(value, Rotation::cur());
@@ -113,9 +113,9 @@ mod tests {
     use halo2_proofs::{
         circuit::floor_planner::V1,
         dev::{FailureLocation, MockProver, VerifyFailure},
-        pasta::Fp,
         plonk::{Any, Circuit},
     };
+    use halo2curves::pasta::Fp;
 
     use super::*;
 

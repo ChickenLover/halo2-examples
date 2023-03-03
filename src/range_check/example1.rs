@@ -83,9 +83,9 @@ mod tests {
     use halo2_proofs::{
         circuit::floor_planner::V1,
         dev::{FailureLocation, MockProver, VerifyFailure},
-        pasta::Fp,
         plonk::{Any, Circuit},
     };
+    use halo2curves::pasta::Fp;
 
     use super::*;
 
@@ -147,7 +147,7 @@ mod tests {
                         region: (0, "Assign value").into(),
                         offset: 0
                     },
-                    cell_values: vec![(((Any::Advice, 0).into(), 0).into(), "0x8".to_string())]
+                    cell_values: vec![(((Any::advice(), 0).into(), 0).into(), "0x8".to_string())]
                 }])
             );
         }

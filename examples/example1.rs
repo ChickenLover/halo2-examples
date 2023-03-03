@@ -1,5 +1,11 @@
 use std::marker::PhantomData;
 use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*, poly::Rotation};
+use std::{time::Instant};
+
+use halo2_proofs::{dev::MockProver, poly::{ipa::{commitment::{ParamsIPA, IPACommitmentScheme}, multiopen::ProverIPA}, commitment::ParamsProver}, plonk::{keygen_vk, keygen_pk, create_proof}, transcript::{Blake2bWrite, Challenge255, TranscriptWriterBuffer}};
+use halo2curves::pasta::{Fp, EqAffine};
+use rand_core::OsRng;
+use peak_alloc::PeakAlloc;
 
 #[derive(Debug, Clone)]
 struct FibonacciConfig {
@@ -165,7 +171,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         let (_, mut prev_b, mut prev_c) =
             chip.assign_first_row(layouter.namespace(|| "first row"))?;
 
-        for _i in 3..10 {
+        for _i in 3..(1 << 20 - 1) {
             let c_cell = chip.assign_row(layouter.namespace(|| "next row"), &prev_b, &prev_c)?;
             prev_b = prev_c;
             prev_c = c_cell;
@@ -177,33 +183,45 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
     }
 }
 
+fn main() {
+    let k = 20;
+
+    let a = Fp::from(1); // F[0]
+    let b = Fp::from(1); // F[1]
+    let out = Fp::from(55); // F[9]
+
+    let circuit = MyCircuit(PhantomData);
+
+    let public_input = vec![a, b, out];
+
+    let params: ParamsIPA<EqAffine> = ParamsIPA::new(k);
+    let vk = keygen_vk(&params, &circuit).expect("keygen_vk should not fail");
+    let pk = keygen_pk(&params, vk, &circuit).expect("keygen_pk should not fail");
+    let rng = OsRng;
+
+    let mut transcript = Blake2bWrite::<_, _, Challenge255<EqAffine>>::init(vec![]);
+
+
+    let start = Instant::now();
+    create_proof::<IPACommitmentScheme<EqAffine>, ProverIPA<EqAffine>, _, _, _, _>(
+        &params,
+        &pk,
+        &[circuit],
+        &[&[&public_input]],
+        rng,
+        &mut transcript,
+    )
+    .expect("proof generation should not fail");
+
+    let duration = start.elapsed();
+    println!("Total time in create proof: {:?}", duration);
+    transcript.finalize();
+}
+
 #[cfg(test)]
 mod tests {
-    use std::marker::PhantomData;
-
-    use super::MyCircuit;
-    use halo2_proofs::{dev::MockProver, pasta::Fp};
 
     #[test]
-    fn fibonacci_example1() {
-        let k = 4;
-
-        let a = Fp::from(1); // F[0]
-        let b = Fp::from(1); // F[1]
-        let out = Fp::from(55); // F[9]
-
-        let circuit = MyCircuit(PhantomData);
-
-        let mut public_input = vec![a, b, out];
-
-        let prover = MockProver::run(k, &circuit, vec![public_input.clone()]).unwrap();
-        prover.assert_satisfied();
-
-        public_input[2] += Fp::one();
-        let _prover = MockProver::run(k, &circuit, vec![public_input]).unwrap();
-        // uncomment the following line and the assert will fail
-        // _prover.assert_satisfied();
-    }
 
     #[cfg(feature = "dev-graph")]
     #[test]

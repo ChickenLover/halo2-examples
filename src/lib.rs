@@ -1,3 +1,2 @@
-mod fibonacci;
-mod is_zero;
-mod range_check;
+pub mod is_zero;
+pub mod range_check;

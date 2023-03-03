@@ -149,7 +149,8 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
 mod tests {
     use super::MyCircuit;
     use std::marker::PhantomData;
-    use halo2_proofs::{dev::MockProver, pasta::Fp};
+    use halo2_proofs::dev::MockProver;
+    use halo2curves::pasta::Fp;
 
     #[test]
     fn fibonacci_example2() {
@@ -185,4 +186,8 @@ mod tests {
             .render(4, &circuit, &root)
             .unwrap();
     }
+}
+
+fn main() {
+    
 }

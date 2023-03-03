@@ -55,7 +55,7 @@ impl<F: FieldExt> FibonacciChip<F> {
             vec![s * (a + b - c)]
         });
 
-        meta.lookup(|meta| {
+        meta.lookup("lookup",|meta| {
             let s = meta.query_selector(s_xor);
             let lhs = meta.query_advice(col_a, Rotation::cur());
             let rhs = meta.query_advice(col_b, Rotation::cur());
@@ -234,7 +234,8 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
 mod tests {
     use super::MyCircuit;
     use std::marker::PhantomData;
-    use halo2_proofs::{dev::MockProver, pasta::Fp};
+    use halo2_proofs::{dev::MockProver};
+    use halo2curves::pasta::Fp;
 
     #[test]
     fn fibonacci_example4() {
@@ -271,4 +272,8 @@ mod tests {
             .render(4, &circuit, &root)
             .unwrap();
     }
+}
+
+fn main() {
+    
 }

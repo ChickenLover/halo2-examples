@@ -1,10 +1,10 @@
-use crate::is_zero::{IsZeroChip, IsZeroConfig};
 use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value},
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Expression, Selector},
     poly::Rotation,
 };
+use halo2_examples::is_zero::{IsZeroConfig, IsZeroChip};
 
 #[derive(Debug, Clone)]
 struct FunctionConfig<F: FieldExt> {
@@ -117,7 +117,8 @@ impl<F: FieldExt> Circuit<F> for FunctionCircuit<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use halo2_proofs::{dev::MockProver, pasta::Fp};
+    use halo2_proofs::{dev::MockProver};
+    use halo2curves::pasta::Fp;
 
     #[test]
     fn test_example3() {
@@ -130,4 +131,8 @@ mod tests {
         let prover = MockProver::run(4, &circuit, vec![]).unwrap();
         prover.assert_satisfied();
     }
+}
+
+fn main() {
+
 }
