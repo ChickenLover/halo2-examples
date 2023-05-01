@@ -542,12 +542,12 @@ dependencies = [
 [[package]]
 name = "halo2_proofs"
 version = "0.2.0"
+source = "git+https://github.com/scroll-tech/halo2.git#0a8646b78286a13d320759b1c585262d6536dce4"
 dependencies = [
  "blake2b_simd",
  "ff",
  "group",
  "halo2curves",
- "peak_alloc",
  "plotters",
  "rand_core",
  "rayon",

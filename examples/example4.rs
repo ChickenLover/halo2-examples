@@ -1,12 +1,18 @@
-use std::marker::PhantomData;
-use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*, poly::Rotation};
+use std::{marker::PhantomData, fs::File, io::{BufReader, BufWriter, Write}, time::Instant};
+use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*, poly::{Rotation, kzg::{commitment::{ParamsKZG, KZGCommitmentScheme}, multiopen::ProverSHPLONK}}, SerdeFormat, transcript::{Blake2bWrite, Challenge255, TranscriptWriterBuffer}};
+use halo2curves::bn256::{Fr, Bn256, G1Affine};
+use rand_core::OsRng;
+#[cfg(feature = "dev-graph")]
+use plotters::prelude::*;
+
+const K: u32 = 16;
 
 #[derive(Debug, Clone)]
 struct FibonacciConfig {
     pub advice: [Column<Advice>; 3],
     pub s_add: Selector,
-    pub s_xor: Selector,
-    pub xor_table: [TableColumn; 3],
+    pub s_reduction: Selector,
+    pub reduction_table: [TableColumn; 3],
     pub instance: Column<Instance>,
 }
 
@@ -27,12 +33,11 @@ impl<F: FieldExt> FibonacciChip<F> {
     pub fn configure(meta: &mut ConstraintSystem<F>) -> FibonacciConfig {
         let col_a = meta.advice_column();
         let col_b = meta.advice_column();
-        let col_c = meta.advice_column();
         let s_add = meta.selector();
-        let s_xor = meta.complex_selector();
+        let s_reduction = meta.complex_selector();
         let instance = meta.instance_column();
 
-        let xor_table = [
+        let reduction_table = [
             meta.lookup_table_column(),
             meta.lookup_table_column(),
             meta.lookup_table_column(),
@@ -43,7 +48,7 @@ impl<F: FieldExt> FibonacciChip<F> {
         meta.enable_equality(col_c);
         meta.enable_equality(instance);
 
-        meta.create_gate("add", |meta| {
+        meta.create_gate("fib mul", |meta| {
             //
             // col_a | col_b | col_c | selector
             //   a      b        c       s
@@ -52,26 +57,29 @@ impl<F: FieldExt> FibonacciChip<F> {
             let a = meta.query_advice(col_a, Rotation::cur());
             let b = meta.query_advice(col_b, Rotation::cur());
             let c = meta.query_advice(col_c, Rotation::cur());
-            vec![s * (a + b - c)]
+
+            vec![
+                s * (a * b - c),
+            ]
         });
 
         meta.lookup("lookup",|meta| {
-            let s = meta.query_selector(s_xor);
+            let s = meta.query_selector(s_reduction);
             let lhs = meta.query_advice(col_a, Rotation::cur());
             let rhs = meta.query_advice(col_b, Rotation::cur());
             let out = meta.query_advice(col_c, Rotation::cur());
             vec![
-                (s.clone() * lhs, xor_table[0]),
-                (s.clone() * rhs, xor_table[1]),
-                (s * out, xor_table[2]),
+                (s.clone() * lhs, reduction_table[0]),
+                (s.clone() * rhs, reduction_table[1]),
+                (s * out, reduction_table[2]),
             ]
         });
 
         FibonacciConfig {
             advice: [col_a, col_b, col_c],
             s_add,
-            s_xor,
-            xor_table,
+            s_reduction,
+            reduction_table,
             instance,
         }
     }
@@ -81,28 +89,28 @@ impl<F: FieldExt> FibonacciChip<F> {
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
         layouter.assign_table(
-            || "xor_table",
+            || "reduction_table",
             |mut table| {
                 let mut idx = 0;
-                for lhs in 0..32 {
-                    for rhs in 0..32 {
+                for lhs in 0..512 {
+                    for rhs in 0..512 {
                         table.assign_cell(
                             || "lhs",
-                            self.config.xor_table[0],
+                            self.config.reduction_table[0],
                             idx,
                             || Value::known(F::from(lhs)),
                         )?;
                         table.assign_cell(
                             || "rhs",
-                            self.config.xor_table[1],
+                            self.config.reduction_table[1],
                             idx,
                             || Value::known(F::from(rhs)),
                         )?;
                         table.assign_cell(
                             || "lhs ^ rhs",
-                            self.config.xor_table[2],
+                            self.config.reduction_table[2],
                             idx,
-                            || Value::known(F::from(lhs ^ rhs)),
+                            || Value::known(F::from((lhs * rhs) & u8::MAX as u64)),
                         )?;
                         idx += 1;
                     }
@@ -169,7 +177,7 @@ impl<F: FieldExt> FibonacciChip<F> {
                             || b_cell.value().copied() + c_cell.value(),
                         )?
                     } else {
-                        self.config.s_xor.enable(&mut region, row)?;
+                        self.config.s_reduction.enable(&mut region, row)?;
                         region.assign_advice(
                             || "advice",
                             self.config.advice[2],
@@ -177,15 +185,15 @@ impl<F: FieldExt> FibonacciChip<F> {
                             || b_cell.value().and_then(|a| c_cell.value().map(|b| {
                                 let a_val = a.get_lower_32() as u64;
                                 let b_val = b.get_lower_32() as u64;
-                                F::from(a_val ^ b_val)
+                                F::from((a_val ^ b_val) & u8::MAX as u64)
                             })),
                         )?
                     };
 
                     b_cell = c_cell;
                     c_cell = new_c_cell;
+                    println!("c_cell: {:?}", c_cell.value());
                 }
-
                 Ok(c_cell)
             },
         )
@@ -223,57 +231,89 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
     ) -> Result<(), Error> {
         let chip = FibonacciChip::construct(config);
         chip.load_table(layouter.namespace(|| "lookup table"))?;
-        let out_cell = chip.assign(layouter.namespace(|| "entire table"), 8)?;
+        let out_cell = chip.assign(layouter.namespace(|| "entire table"), 1 << (K - 1))?;
         chip.expose_public(layouter.namespace(|| "out"), out_cell, 2)?;
 
         Ok(())
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::MyCircuit;
-    use std::marker::PhantomData;
-    use halo2_proofs::{dev::MockProver};
-    use halo2curves::pasta::Fp;
+fn main() {
+    let a = Fr::from(1); // F[0]
+    let b = Fr::from(1); // F[1]
+    let out = Fr::from(0xb5); // F[1 << K]
 
-    #[test]
-    fn fibonacci_example4() {
-        let k = 11;
-
-        let a = Fp::from(1); // F[0]
-        let b = Fp::from(1); // F[1]
-        let out = Fp::from(21); // F[9]
-
-        let circuit = MyCircuit(PhantomData);
-
-        let mut public_input = vec![a, b, out];
-
-        let prover = MockProver::run(k, &circuit, vec![public_input.clone()]).unwrap();
-        prover.assert_satisfied();
-
-        public_input[2] += Fp::one();
-        let _prover = MockProver::run(k, &circuit, vec![public_input]).unwrap();
-        // uncomment the following line and the assert will fail
-        // _prover.assert_satisfied();
-    }
+    let circuit = MyCircuit(PhantomData);
 
     #[cfg(feature = "dev-graph")]
-    #[test]
-    fn plot_fibonacci1() {
-        use plotters::prelude::*;
-
-        let root = BitMapBackend::new("fib-1-layout.png", (1024, 3096)).into_drawing_area();
+    {
+        let root = BitMapBackend::new("fib-4-layout.png", (1024, 3096)).into_drawing_area();
         root.fill(&WHITE).unwrap();
-        let root = root.titled("Fib 1 Layout", ("sans-serif", 60)).unwrap();
-
-        let circuit = MyCircuit::<Fp>(PhantomData);
+        let root = root.titled("Fib 2 Layout", ("sans-serif", 60)).unwrap();
         halo2_proofs::dev::CircuitLayout::default()
-            .render(4, &circuit, &root)
-            .unwrap();
+        .render(1 << (K - 1), &circuit, &root)
+        .unwrap();
     }
-}
 
-fn main() {
-    
+    let mut public_input = vec![a, b, out];
+
+    let params = ParamsKZG::<Bn256>::setup(K, OsRng);
+
+    let vk_name = format!("fib4-{}.vk", K);
+    let pk_name = format!("fib4-{}.pk", K);
+    let read_from_file = std::path::Path::new(&vk_name).exists() && std::path::Path::new(&pk_name).exists();
+
+    let vk = if read_from_file {
+        let f = File::open(vk_name).unwrap();
+        let mut reader = BufReader::new(f);
+        VerifyingKey::<G1Affine>::read::<_, MyCircuit<_>>(&mut reader, SerdeFormat::RawBytes)
+            .unwrap()
+    } else {
+        let vk = keygen_vk(&params, &circuit).expect("keygen_vk should not fail");
+        let f = File::create(vk_name).unwrap();
+        let mut writer = BufWriter::new(f);
+        vk.write(&mut writer, SerdeFormat::RawBytes).unwrap();
+        writer.flush().unwrap();
+        println!("VK generated");
+        vk
+    };
+
+    let pk = if read_from_file {
+        let f = File::open(pk_name).unwrap();
+        let mut reader = BufReader::new(f);
+        ProvingKey::<G1Affine>::read::<_, MyCircuit<_>>(&mut reader, SerdeFormat::RawBytes)
+            .unwrap()
+    } else {
+        let pk = keygen_pk(&params, vk, &circuit).expect("keygen_pk should not fail");
+        let f = File::create(pk_name).unwrap();
+        let mut writer = BufWriter::new(f);
+        pk.write(&mut writer, SerdeFormat::RawBytes).unwrap();
+        writer.flush().unwrap();
+        println!("PK generated");
+        pk
+    };
+
+    println!("k = {}", &pk.get_vk().get_domain().k());
+    println!("extended_k = {}", &pk.get_vk().get_domain().extended_k());
+    // std::fs::remove_file(pk_name).unwrap();
+
+    let rng = OsRng;
+
+    let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
+
+
+    let start = Instant::now();
+    create_proof::<KZGCommitmentScheme<Bn256>, ProverSHPLONK<_, >, _, _, _, _>(
+        &params,
+        &pk,
+        &[circuit],
+        &[&[&public_input]],
+        rng,
+        &mut transcript,
+    )
+    .unwrap();
+
+    let duration = start.elapsed();
+    println!("Total time in create proof: {:?}", duration);
+    transcript.finalize();
 }

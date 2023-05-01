@@ -1,9 +1,9 @@
-use std::marker::PhantomData;
-use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*, poly::Rotation};
+use std::{marker::PhantomData, fs::File, io::{BufWriter, BufReader, Write}};
+use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*, poly::{Rotation, kzg::{commitment::{ParamsKZG, KZGCommitmentScheme}, multiopen::{ProverGWC, ProverSHPLONK}}}, SerdeFormat};
 use std::{time::Instant};
 
 use halo2_proofs::{dev::MockProver, poly::{ipa::{commitment::{ParamsIPA, IPACommitmentScheme}, multiopen::ProverIPA}, commitment::ParamsProver}, plonk::{keygen_vk, keygen_pk, create_proof}, transcript::{Blake2bWrite, Challenge255, TranscriptWriterBuffer}};
-use halo2curves::pasta::{Fp, EqAffine};
+use halo2curves::{pasta::{Fp, EqAffine}, bn256::{Bn256, G1Affine, Fr}};
 use rand_core::OsRng;
 use peak_alloc::PeakAlloc;
 
@@ -15,6 +15,8 @@ struct FibonacciConfig {
     pub selector: Selector,
     pub instance: Column<Instance>,
 }
+
+const K: u32 = 19;
 
 #[derive(Debug, Clone)]
 struct FibonacciChip<F: FieldExt> {
@@ -171,7 +173,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         let (_, mut prev_b, mut prev_c) =
             chip.assign_first_row(layouter.namespace(|| "first row"))?;
 
-        for _i in 3..(1 << 20 - 1) {
+        for _i in 3..(1 << K - 1) {
             let c_cell = chip.assign_row(layouter.namespace(|| "next row"), &prev_b, &prev_c)?;
             prev_b = prev_c;
             prev_c = c_cell;
@@ -184,26 +186,62 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
 }
 
 fn main() {
-    let k = 20;
-
-    let a = Fp::from(1); // F[0]
-    let b = Fp::from(1); // F[1]
-    let out = Fp::from(55); // F[9]
+    let a = Fr::from(1); // F[0]
+    let b = Fr::from(1); // F[1]
+    let out = Fr::from(55); // F[9]
 
     let circuit = MyCircuit(PhantomData);
 
     let public_input = vec![a, b, out];
 
-    let params: ParamsIPA<EqAffine> = ParamsIPA::new(k);
-    let vk = keygen_vk(&params, &circuit).expect("keygen_vk should not fail");
-    let pk = keygen_pk(&params, vk, &circuit).expect("keygen_pk should not fail");
+    // let params: ParamsIPA<EqAffine> = ParamsIPA::new(k);
+    let params = ParamsKZG::<Bn256>::setup(K, OsRng);
+
+    let vk_name = format!("fib-{}.vk", K);
+    let pk_name = format!("fib-{}.pk", K);
+    let read_from_file = std::path::Path::new(&vk_name).exists() && std::path::Path::new(&pk_name).exists();
+
+    let vk = if read_from_file {
+        let f = File::open(vk_name).unwrap();
+        let mut reader = BufReader::new(f);
+        VerifyingKey::<G1Affine>::read::<_, MyCircuit<_>>(&mut reader, SerdeFormat::RawBytes)
+            .unwrap()
+    } else {
+        let vk = keygen_vk(&params, &circuit).expect("keygen_vk should not fail");
+        let f = File::create(vk_name).unwrap();
+        let mut writer = BufWriter::new(f);
+        vk.write(&mut writer, SerdeFormat::RawBytes).unwrap();
+        writer.flush().unwrap();
+        println!("VK generated");
+        vk
+    };
+
+    let pk = if read_from_file {
+        let f = File::open(pk_name).unwrap();
+        let mut reader = BufReader::new(f);
+        ProvingKey::<G1Affine>::read::<_, MyCircuit<_>>(&mut reader, SerdeFormat::RawBytes)
+            .unwrap()
+    } else {
+        let pk = keygen_pk(&params, vk, &circuit).expect("keygen_pk should not fail");
+        let f = File::create(pk_name).unwrap();
+        let mut writer = BufWriter::new(f);
+        pk.write(&mut writer, SerdeFormat::RawBytes).unwrap();
+        writer.flush().unwrap();
+        println!("PK generated");
+        pk
+    };
+
+    println!("k = {}", &pk.get_vk().get_domain().k());
+    println!("extended_k = {}", &pk.get_vk().get_domain().extended_k());
+    // std::fs::remove_file(pk_name).unwrap();
+
     let rng = OsRng;
 
-    let mut transcript = Blake2bWrite::<_, _, Challenge255<EqAffine>>::init(vec![]);
+    let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
 
 
     let start = Instant::now();
-    create_proof::<IPACommitmentScheme<EqAffine>, ProverIPA<EqAffine>, _, _, _, _>(
+    create_proof::<KZGCommitmentScheme<Bn256>, ProverSHPLONK<_, >, _, _, _, _>(
         &params,
         &pk,
         &[circuit],
