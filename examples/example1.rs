@@ -3,7 +3,7 @@ use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*, poly::{Rotation, 
 use std::{time::Instant};
 
 use halo2_proofs::{dev::MockProver, poly::{ipa::{commitment::{ParamsIPA, IPACommitmentScheme}, multiopen::ProverIPA}, commitment::ParamsProver}, plonk::{keygen_vk, keygen_pk, create_proof}, transcript::{Blake2bWrite, Challenge255, TranscriptWriterBuffer}};
-use halo2curves::{pasta::{Fp, EqAffine}, bn256::{Bn256, G1Affine, Fr}};
+use halo2_proofs::halo2curves::{pasta::{Fp, EqAffine}, bn256::{Bn256, G1Affine, Fr}};
 use rand_core::OsRng;
 use peak_alloc::PeakAlloc;
 
@@ -237,11 +237,17 @@ fn main() {
 
     let rng = OsRng;
 
-    let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
-
+    let mut transcript = Blake2bWrite::<_, G1Affine, Challenge255<_>>::init(vec![]);
 
     let start = Instant::now();
-    create_proof::<KZGCommitmentScheme<Bn256>, ProverSHPLONK<_, >, _, _, _, _>(
+    create_proof::<
+        KZGCommitmentScheme<Bn256>,
+        ProverSHPLONK<'_, Bn256>,
+        Challenge255<G1Affine>,
+        _,
+        Blake2bWrite<Vec<u8>, G1Affine, Challenge255<G1Affine>>,
+        _
+    >(
         &params,
         &pk,
         &[circuit],

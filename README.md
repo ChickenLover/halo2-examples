@@ -4,21 +4,11 @@ This repo includes a few simple examples to illustrate how to write circuit in H
 
 ## Instruction
 
-Compile the repo
-
-```
-cargo build
-```
-
 Run examples
 ```
-cargo test -- --nocapture test_example1
-cargo test -- --nocapture test_example2
-cargo test -- --nocapture test_example3
+cargo run --release --example example5
 ```
 
-Plot the circuit layout
-```
-cargo test --all-features -- --nocapture plot_fibo1
-cargo test --all-features -- --nocapture plot_fibo2
-```
+The keys for each degree will be cached. To clear the cached keys just remove them from the project directory.
+
+To change the degree - change the K in the `examples/example5.rs`

@@ -1,6 +1,6 @@
 use std::{marker::PhantomData, fs::File, io::{BufReader, BufWriter, Write}, time::Instant};
 use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*, poly::{Rotation, kzg::{commitment::{ParamsKZG, KZGCommitmentScheme}, multiopen::{ProverSHPLONK, VerifierSHPLONK}, strategy::SingleStrategy}}, SerdeFormat, transcript::{Blake2bWrite, Challenge255, TranscriptWriterBuffer, Blake2bRead, TranscriptReadBuffer}};
-use halo2curves::bn256::{Fr, Bn256, G1Affine};
+use halo2_proofs::halo2curves::bn256::{Fr, Bn256, G1Affine};
 use rand_core::OsRng;
 #[cfg(feature = "dev-graph")]
 use plotters::prelude::*;
